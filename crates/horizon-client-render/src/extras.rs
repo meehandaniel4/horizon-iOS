@@ -230,6 +230,9 @@ impl Default for Extras {
             splitscreen_two: 0,
             splitscreen_three: 0,
             splitscreen_names: true,
+            #[cfg(target_os = "ios")]
+            wheel_cycles_settings: false,
+            #[cfg(not(target_os = "ios"))]
             wheel_cycles_settings: true,
             music_off: Vec::new(),
             music_page: false,

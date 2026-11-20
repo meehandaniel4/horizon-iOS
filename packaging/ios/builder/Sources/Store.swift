@@ -22,6 +22,12 @@ final class Store: ObservableObject {
     /// `-HorizonTutorial <part>`: recording the install tutorial (Demo.swift). GitHub is asked without
     /// a token then, as the one shown is made up.
     static let tutorial = UserDefaults.standard.string(forKey: "HorizonTutorial")
+    /// Language code: "ru" or "en".
+    @Published var language: String {
+        didSet { UserDefaults.standard.set(language, forKey: "app_language") }
+    }
+    var isRu: Bool { language == "ru" }
+
     /// Instances run inside LiveContainer (one app slot for all of them) instead of as apps of their own.
     @Published var useLiveContainer: Bool {
         didSet { UserDefaults.standard.set(useLiveContainer, forKey: "useLiveContainer") }
@@ -80,6 +86,7 @@ final class Store: ObservableObject {
         runInstance = defaults.dictionary(forKey: "runInstance") as? [String: String] ?? [:]
         hidden = Set(defaults.stringArray(forKey: "hiddenInstances") ?? [])
         useLiveContainer = defaults.bool(forKey: "useLiveContainer")
+        language = defaults.string(forKey: "app_language") ?? "ru"
         // `-HorizonTab builds` opens on a tab (the preview screenshots use it).
         switch defaults.string(forKey: "HorizonTab") {
         case "builds": tab = .builds

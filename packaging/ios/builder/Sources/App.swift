@@ -50,7 +50,7 @@ struct RootView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                TabBar(tab: $store.tab, building: store.activeCount)
+                TabBar(tab: $store.tab, building: store.activeCount, isRu: store.isRu)
             }
         }
         .task { await store.loadMods() }
@@ -86,14 +86,15 @@ struct RootView: View {
 struct TabBar: View {
     @Binding var tab: AppTab
     let building: Int
+    let isRu: Bool
 
     var body: some View {
         HStack(spacing: 4) {
-            item(.mods, icon: "puzzle", label: "Mods")
-            item(.create, icon: "pencil-edit-02", label: "Create")
-            item(.builds, icon: "package-01", label: "Builds")
-            item(.instances, icon: "game-controller-01", label: "Play")
-            item(.settings, icon: "sliders-horizontal", label: "Settings")
+            item(.mods, icon: "puzzle", label: isRu ? "Моды" : "Mods")
+            item(.create, icon: "pencil-edit-02", label: isRu ? "Создать" : "Create")
+            item(.builds, icon: "package-01", label: isRu ? "Сборки" : "Builds")
+            item(.instances, icon: "game-controller-01", label: isRu ? "Играть" : "Play")
+            item(.settings, icon: "sliders-horizontal", label: isRu ? "Настройки" : "Settings")
         }
         .padding(5)
         .glass(Theme.Radius.panel)

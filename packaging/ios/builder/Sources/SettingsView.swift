@@ -13,10 +13,21 @@ struct SettingsView: View {
         ScrollViewReader { reader in
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                PageHeader(title: "Settings", caption: "Your fork, and the token that lets this app start builds.")
+                PageHeader(
+                    title: store.isRu ? "Настройки" : "Settings",
+                    caption: store.isRu ? "Ваш форк, токен GitHub и параметры лаунчера." : "Your fork, and the token that lets this app start builds."
+                )
+
+                Plate(store.isRu ? "Язык интерфейса" : "Language") {
+                    Picker("", selection: $store.language) {
+                        Text("Русский").tag("ru")
+                        Text("English").tag("en")
+                    }
+                    .pickerStyle(.segmented)
+                }
 
                 Color.clear.frame(height: 0).id("repo")
-                Plate("Your fork") {
+                Plate(store.isRu ? "Ваш форк" : "Your fork") {
                     FieldBox {
                         TextField("", text: $store.repo, prompt: Text(Store.bundledRepo.isEmpty ? "owner/repository" : Store.bundledRepo).foregroundColor(Theme.ink(0.4)))
                             .font(.mono(15))
@@ -24,13 +35,13 @@ struct SettingsView: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                     }
-                    Text("The GitHub repository that builds Horizon for iOS.")
+                    Text(store.isRu ? "Репозиторий GitHub, который собирает Horizon для iOS." : "The GitHub repository that builds Horizon for iOS.")
                         .font(.geist(12))
                         .foregroundStyle(Theme.ink(0.55))
                 }
 
                 Color.clear.frame(height: 0).id("token")
-                Plate("GitHub token") {
+                Plate(store.isRu ? "Токен GitHub" : "GitHub token") {
                     FieldBox {
                         SecureField("", text: $store.token, prompt: Text("github_pat_…").foregroundColor(Theme.ink(0.4)))
                             .font(.mono(15))
@@ -47,7 +58,7 @@ struct SettingsView: View {
                         } label: {
                             HStack(spacing: 6) {
                                 HIcon(name: "copy-01", size: 16)
-                                Text("Paste")
+                                Text(store.isRu ? "Вставить" : "Paste")
                             }
                         }
                         .buttonStyle(QuietButton())
@@ -65,7 +76,7 @@ struct SettingsView: View {
                                 } else {
                                     HIcon(name: "tick-02", size: 16)
                                 }
-                                Text("Check")
+                                Text(store.isRu ? "Проверить" : "Check")
                             }
                         }
                         .buttonStyle(QuietButton())
@@ -73,7 +84,7 @@ struct SettingsView: View {
                         .opacity(!store.hasToken ? 0.4 : 1)
                         Spacer()
                         if store.hasToken {
-                            Button("Remove") {
+                            Button(store.isRu ? "Удалить" : "Remove") {
                                 store.token = ""
                                 check = nil
                             }
@@ -86,7 +97,7 @@ struct SettingsView: View {
                             Text(check.text).font(.geist(13)).foregroundStyle(Theme.ink(0.8))
                         }
                     }
-                    Text("Kept in this iPhone's keychain, and only ever sent to GitHub.")
+                    Text(store.isRu ? "Хранится в Keychain этого iPhone и отправляется только в GitHub." : "Kept in this iPhone's keychain, and only ever sent to GitHub.")
                         .font(.geist(12))
                         .foregroundStyle(Theme.ink(0.55))
                 }
@@ -97,23 +108,23 @@ struct SettingsView: View {
                 AIAccounts()
 
                 Color.clear.frame(height: 0).id("maketoken")
-                Plate("Make a token") {
-                    StepRow(number: 1, text: "Open GitHub's token page below and sign in.")
-                    StepRow(number: 2, text: "Name it “Horizon Mods”. Under Repository access choose Only select repositories, then \(store.repo.isEmpty ? "your fork" : store.repo).")
-                    StepRow(number: 3, text: "Under Permissions, Repository permissions, set Actions, Contents and Issues to Read and write. (To send mods to Horizon's registry, give it All repositories and Administration: Read and write too.)")
-                    StepRow(number: 4, text: "Tap Generate token, copy it, come back here and tap Paste.")
+                Plate(store.isRu ? "Создание токена" : "Make a token") {
+                    StepRow(number: 1, text: store.isRu ? "Откройте страницу токенов GitHub по кнопке ниже и войдите." : "Open GitHub's token page below and sign in.")
+                    StepRow(number: 2, text: store.isRu ? "Назовите его «Horizon Mods». В доступе к репозиториям выберите Only select repositories, затем \(store.repo.isEmpty ? "ваш форк" : store.repo)." : "Name it “Horizon Mods”. Under Repository access choose Only select repositories, then \(store.repo.isEmpty ? "your fork" : store.repo).")
+                    StepRow(number: 3, text: store.isRu ? "В Repository permissions установите Actions, Contents и Issues на Read and write." : "Under Permissions, Repository permissions, set Actions, Contents and Issues to Read and write. (To send mods to Horizon's registry, give it All repositories and Administration: Read and write too.)")
+                    StepRow(number: 4, text: store.isRu ? "Нажмите Generate token, скопируйте его, вернитесь сюда и нажмите Вставить." : "Tap Generate token, copy it, come back here and tap Paste.")
                     Link(destination: URL(string: "https://github.com/settings/personal-access-tokens/new")!) {
                         HStack(spacing: 8) {
                             HIcon(name: "github", size: 18)
-                            Text("Open GitHub's token page")
+                            Text(store.isRu ? "Открыть страницу токенов GitHub" : "Open GitHub's token page")
                         }
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(AccentButton(height: 46))
                 }
 
-                Plate("About") {
-                    Text("Native mods change Horizon's own code and run with full access to the app. Only build mods you trust.")
+                Plate(store.isRu ? "О приложении" : "About") {
+                    Text(store.isRu ? "Нативные моды изменяют исходный код Horizon. Собирайте только моды, которым доверяете." : "Native mods change Horizon's own code and run with full access to the app. Only build mods you trust.")
                         .font(.geist(14))
                         .foregroundStyle(Theme.ink(0.75))
                     HStack {
@@ -121,13 +132,13 @@ struct SettingsView: View {
                             Link(destination: url) {
                                 HStack(spacing: 6) {
                                     HIcon(name: "link-01", size: 16)
-                                    Text("All builds on GitHub")
+                                    Text(store.isRu ? "Все сборки на GitHub" : "All builds on GitHub")
                                 }
                             }
                             .buttonStyle(QuietButton())
                         }
                         Spacer()
-                        Text("Version " + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"))
+                        Text((store.isRu ? "Версия " : "Version ") + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"))
                             .font(.mono(12))
                             .foregroundStyle(Theme.ink(0.5))
                     }
@@ -142,15 +153,13 @@ struct SettingsView: View {
         }
         }
         .scrollDismissesKeyboard(.interactively)
-        // Any file: a .p12 from another app or iCloud doesn't always carry the PKCS #12 type.
-        // UIKit's own picker, copying the file in: SwiftUI's picker left a .p12 untappable.
         .sheet(isPresented: $importingCertificate) {
             DocumentPicker { url in
                 importingCertificate = false
                 guard let url else { return }
                 certificateFile = Certificate.read(url)
                 certificateProblem = certificateFile == nil
-                    ? "Couldn't read \(url.lastPathComponent). Put it in On My iPhone > Horizon Mods instead."
+                    ? (store.isRu ? "Не удалось прочитать \(url.lastPathComponent)." : "Couldn't read \(url.lastPathComponent). Put it in On My iPhone > Horizon Mods instead.")
                     : nil
             }
             .ignoresSafeArea()

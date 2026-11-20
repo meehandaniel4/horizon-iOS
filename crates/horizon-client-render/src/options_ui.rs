@@ -4527,8 +4527,14 @@ impl OptionsUi {
         }
         let plain = self.resource_error.is_none()
             && !(self.pack_screen.is_some() && self.stack.last() == Some(&Page::Packs));
+        // Touch screens / iOS: the wheel only scrolls lists; settings change only on explicit click.
+        #[cfg(target_os = "ios")]
+        let allow_wheel_cycle = false;
+        #[cfg(not(target_os = "ios"))]
+        let allow_wheel_cycle = s.extras.wheel_cycles_settings;
+
         // The "Scroll wheel changes settings" extra off: the wheel only scrolls.
-        if !plain || !s.extras.wheel_cycles_settings {
+        if !plain || !allow_wheel_cycle {
             self.scroll_at(s, size, cursor, amount);
             return Vec::new();
         }

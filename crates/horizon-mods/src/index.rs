@@ -307,10 +307,13 @@ impl Index {
                     return Err(at("empty or repeated version".into()));
                 }
                 let f = &v.file;
-                let extension_ok = p
-                    .kind
-                    .extension()
-                    .is_none_or(|e| f.name.ends_with(&format!(".{e}")));
+                let extension_ok = match p.kind {
+                    Kind::NativeMod => f.name.ends_with(".hnmod") || f.name.ends_with(".hmod"),
+                    _ => p
+                        .kind
+                        .extension()
+                        .is_none_or(|e| f.name.ends_with(&format!(".{e}"))),
+                };
                 if !plain_name(&f.name) || !extension_ok {
                     return Err(at(format!(
                         "{:?} is not a plain file name for a {}",

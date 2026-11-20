@@ -981,7 +981,12 @@ impl ControllerUi {
         framebuffer: [i32; 2],
         amount: f32,
     ) -> Vec<Action> {
-        if amount != 0.0 && s.extras.wheel_cycles_settings {
+        #[cfg(target_os = "ios")]
+        let allow_wheel_cycle = false;
+        #[cfg(not(target_os = "ios"))]
+        let allow_wheel_cycle = s.extras.wheel_cycles_settings;
+
+        if amount != 0.0 && allow_wheel_cycle {
             let (cols, lines, _) = self.layout(s, w, h);
             let hovered = (y >= cols.top && y < cols.bottom)
                 .then(|| {

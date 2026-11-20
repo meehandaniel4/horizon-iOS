@@ -64,6 +64,12 @@ final class Library: ObservableObject {
         .sorted { $0.date > $1.date }
     }
 
+    /// Imports game resources from a selected horizon-resources.zip file into Documents/resources.
+    func importResources(from zipURL: URL) throws {
+        _ = try Unzip.resources(from: zipURL, into: Self.documents)
+        objectWillChange.send()
+    }
+
     func refresh(gitHub: GitHub) async {
         loading = true
         defer { loading = false }
@@ -270,5 +276,79 @@ enum Unzip {
         }
         guard let appName else { throw Problem(message: "there's no app in the .ipa") }
         return (appName, written)
+    }
+
+    /// Unpacks a horizon-resources.zip archive directly into Documents/resources.
+    static func resources(from zipURL: URL, into folder: URL) throws -> Int64 {
+        let data = try Data(contentsOf: zipURL, options: .alwaysMapped)
+        let fm = FileManager.default
+        let resourcesFolder = folder.appendingPathComponent("resources")
+        try fm.createDirectory(at: resourcesFolder, withIntermediateDirectories: true)
+        var written: Int64 = 0
+        try data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+            func u16(_ at: Int) throws -> Int {
+                guard at >= 0, at + 2 <= raw.count else { throw Problem(message: "zip is cut short") }
+                return Int(raw.loadUnaligned(fromByteOffset: at, as: UInt16.self).littleEndian)
+            }
+            func u32(_ at: Int) throws -> Int {
+                guard at >= 0, at + 4 <= raw.count else { throw Problem(message: "zip is cut short") }
+                return Int(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self).littleEndian)
+            }
+            var end = -1
+            var at = raw.count - 22
+            while at >= max(0, raw.count - 65_558) {
+                if try u32(at) == 0x0605_4b50 { end = at; break }
+                at -= 1
+            }
+            guard end >= 0 else { throw Problem(message: "not a valid zip file") }
+            let count = try u16(end + 10)
+            var entry = try u32(end + 16)
+            for _ in 0..<count {
+                guard try u32(entry) == 0x0201_4b50 else { throw Problem(message: "damaged zip directory") }
+                let method = try u16(entry + 10)
+                let packed = try u32(entry + 20)
+                let size = try u32(entry + 24)
+                let nameLength = try u16(entry + 28)
+                let extra = try u16(entry + 30)
+                let comment = try u16(entry + 32)
+                let local = try u32(entry + 42)
+                guard entry + 46 + nameLength <= raw.count,
+                      let name = String(bytes: raw[(entry + 46)..<(entry + 46 + nameLength)], encoding: .utf8) else {
+                    throw Problem(message: "damaged zip entry name")
+                }
+                entry += 46 + nameLength + extra + comment
+                if name.contains("..") || name.hasPrefix("/") { continue }
+                let to = name.hasPrefix("resources/") ? folder.appendingPathComponent(name) : resourcesFolder.appendingPathComponent(name)
+                if name.hasSuffix("/") {
+                    try fm.createDirectory(at: to, withIntermediateDirectories: true)
+                    continue
+                }
+                try fm.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
+                let header = local
+                guard try u32(header) == 0x0403_4b50 else { throw Problem(message: "damaged zip entry header") }
+                let start = try header + 30 + u16(header + 26) + u16(header + 28)
+                guard start + packed <= raw.count else { throw Problem(message: "zip is cut short") }
+                let source = UnsafeRawBufferPointer(rebasing: raw[start..<(start + packed)])
+                var out = Data(count: size)
+                switch method {
+                case 0:
+                    guard packed == size else { throw Problem(message: "\(name) size mismatch") }
+                    out = Data(source)
+                case 8:
+                    let n = out.withUnsafeMutableBytes { dst -> Int in
+                        guard size > 0 else { return 0 }
+                        return compression_decode_buffer(dst.bindMemory(to: UInt8.self).baseAddress!, size,
+                                                         source.bindMemory(to: UInt8.self).baseAddress!, packed,
+                                                         nil, COMPRESSION_ZLIB)
+                    }
+                    guard n == size else { throw Problem(message: "\(name) failed to decompress") }
+                default:
+                    throw Problem(message: "\(name) has unsupported compression method \(method)")
+                }
+                try out.write(to: to)
+                written += Int64(size)
+            }
+        }
+        return written
     }
 }
