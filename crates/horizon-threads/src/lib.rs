@@ -29,6 +29,49 @@ pub fn worker_count() -> usize {
     })
 }
 
+/// Present the embedded iOS launcher, if the framework is present in the app bundle.
+pub fn ios_launcher_present() -> bool {
+    #[cfg(target_os = "ios")]
+    {
+        static PRESENTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if PRESENTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            return false;
+        }
+
+        let framework_path = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("Frameworks/HorizonLauncherKit.framework/HorizonLauncherKit")));
+
+        let Some(path) = framework_path else {
+            return false;
+        };
+        if !path.exists() {
+            return false;
+        }
+
+        if let Ok(cpath) = std::ffi::CString::new(path.into_os_string().into_encoded_bytes()) {
+            unsafe {
+                let handle = libc::dlopen(cpath.as_ptr(), libc::RTLD_NOW);
+                if handle.is_null() {
+                    return false;
+                }
+                let symbol = libc::dlsym(handle, c"horizon_launcher_present".as_ptr());
+                if symbol.is_null() {
+                    return false;
+                }
+                let call = std::mem::transmute::<*mut std::ffi::c_void, extern "C" fn() -> bool>(symbol);
+                call()
+            }
+        } else {
+            false
+        }
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        false
+    }
+}
+
 /// `Some(n)` when `value` names a positive count (`" 4 "` counts; `"0"`,
 /// `"lots"`, a missing variable don't).
 fn parse_worker_count(value: Option<String>) -> Option<usize> {

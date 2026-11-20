@@ -309,6 +309,7 @@ impl Index {
                 let f = &v.file;
                 let extension_ok = match p.kind {
                     Kind::NativeMod => f.name.ends_with(".hnmod") || f.name.ends_with(".hmod"),
+                    Kind::Mod => f.name.ends_with(".hmod") || f.name.ends_with(".hnmod"),
                     _ => p
                         .kind
                         .extension()

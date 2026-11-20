@@ -274,7 +274,7 @@ struct LauncherRootView: View {
                 Text("Horizon")
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
-                Text("Minecraft Java • Версия 0.5.0")
+                Text("Minecraft Java • Версия 0.6.0")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.white.opacity(0.6))
             }
