@@ -30,15 +30,19 @@ if [[ -d "$here/Launcher" ]]; then
   framework_dir="$app/Frameworks/HorizonLauncherKit.framework"
   mkdir -p "$framework_dir"
   echo "Compiling HorizonLauncherKit.framework..."
-  xcrun --sdk iphoneos swiftc -target arm64-apple-ios15.0 -O -emit-library \
+  xcrun --sdk iphoneos swiftc -target arm64-apple-ios15.0 -O -emit-library -parse-as-library \
     -module-name HorizonLauncherKit \
-    -install_name @rpath/HorizonLauncherKit.framework/HorizonLauncherKit \
+    -Xlinker -install_name -Xlinker @rpath/HorizonLauncherKit.framework/HorizonLauncherKit \
     -o "$framework_dir/HorizonLauncherKit" \
     "$here"/Launcher/*.swift \
     -framework UIKit -framework SwiftUI -framework Foundation -framework Security -framework UniformTypeIdentifiers -framework Compression
   chmod 755 "$framework_dir/HorizonLauncherKit"
+  install_name_tool -id @rpath/HorizonLauncherKit.framework/HorizonLauncherKit "$framework_dir/HorizonLauncherKit" 2>/dev/null || true
   cp "$here/Launcher/Info.plist" "$framework_dir/Info.plist"
   plutil -lint "$framework_dir/Info.plist"
+
+  # Ad-hoc sign framework so it can be mapped by kernel
+  codesign -s - --force "$framework_dir" 2>/dev/null || true
 
   # Ensure rpath is set on horizon-client
   install_name_tool -add_rpath @executable_path/Frameworks "$app/horizon-client" 2>/dev/null || true

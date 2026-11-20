@@ -38,33 +38,38 @@ pub fn ios_launcher_present() -> bool {
             return false;
         }
 
-        let framework_path = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.join("Frameworks/HorizonLauncherKit.framework/HorizonLauncherKit")));
+        let mut candidate_paths: Vec<std::ffi::CString> = Vec::new();
 
-        let Some(path) = framework_path else {
-            return false;
-        };
-        if !path.exists() {
-            return false;
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(parent) = exe.parent() {
+                let abs = parent.join("Frameworks/HorizonLauncherKit.framework/HorizonLauncherKit");
+                if let Ok(c) = std::ffi::CString::new(abs.into_os_string().into_encoded_bytes()) {
+                    candidate_paths.push(c);
+                }
+            }
+        }
+        if let Ok(c) = std::ffi::CString::new("@executable_path/Frameworks/HorizonLauncherKit.framework/HorizonLauncherKit") {
+            candidate_paths.push(c);
+        }
+        if let Ok(c) = std::ffi::CString::new("@rpath/HorizonLauncherKit.framework/HorizonLauncherKit") {
+            candidate_paths.push(c);
         }
 
-        if let Ok(cpath) = std::ffi::CString::new(path.into_os_string().into_encoded_bytes()) {
+        for cpath in candidate_paths {
             unsafe {
                 let handle = libc::dlopen(cpath.as_ptr(), libc::RTLD_NOW);
                 if handle.is_null() {
-                    return false;
+                    continue;
                 }
                 let symbol = libc::dlsym(handle, c"horizon_launcher_present".as_ptr());
                 if symbol.is_null() {
-                    return false;
+                    continue;
                 }
                 let call = std::mem::transmute::<*mut std::ffi::c_void, extern "C" fn() -> bool>(symbol);
-                call()
+                return call();
             }
-        } else {
-            false
         }
+        false
     }
     #[cfg(not(target_os = "ios"))]
     {
