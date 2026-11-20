@@ -17645,6 +17645,7 @@ impl ApplicationHandler for Game<'_> {
             if touch.phase == winit::event::TouchPhase::Cancelled {
                 self.pad.touch.release_all();
                 let _ = self.play_mouse(winit::event::MouseButton::Left, false);
+                let _ = self.pad.touch_mouse.release();
             }
             let lifted = touch.phase == winit::event::TouchPhase::Ended;
             let events = self.touch_event(touch);
@@ -18158,6 +18159,7 @@ impl Game<'_> {
                     } else {
                         self.pad.touch.release_all();
                         let _ = self.play_mouse(MouseButton::Left, false);
+                        let _ = self.pad.touch_mouse.release();
                         // A held pointer goes with the focus, wherever the
                         // system keeps the grab: the window asks for it back
                         // when the focus returns (`regrab_on_refocus`).

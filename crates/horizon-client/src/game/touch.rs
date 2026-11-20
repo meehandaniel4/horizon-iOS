@@ -142,6 +142,7 @@ impl Game<'_> {
         if touch.phase == TouchPhase::Cancelled {
             self.pad.touch.release_all();
             let _ = self.play_mouse(MouseButton::Left, false);
+            let _ = self.pad.touch_mouse.release();
         }
         // The mods screen and the title screen's button for it.
         if self.mods_touch(&touch) {
