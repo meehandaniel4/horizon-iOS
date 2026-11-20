@@ -7,3 +7,4 @@ enum L10n {
         store.isRu ? ru : en
     }
 }
+

@@ -352,6 +352,7 @@ mod titles;
 mod tnt;
 mod totem;
 mod touch;
+pub(crate) mod ios_launcher;
 mod trading;
 mod transient_blocks;
 mod trial_spawner;
@@ -17617,6 +17618,7 @@ impl ApplicationHandler for Game<'_> {
             window.set_prefers_status_bar_hidden(true);
             window.set_preferred_screen_edges_deferring_system_gestures(ScreenEdge::ALL);
             window.recognize_doubletap_gesture(false);
+            ios_launcher::present();
         }
         drop(window_step);
         horizon_client::telemetry::note_display(&window);
@@ -21771,6 +21773,7 @@ impl Loading {
             window.set_prefers_status_bar_hidden(true);
             window.set_preferred_screen_edges_deferring_system_gestures(ScreenEdge::ALL);
             window.recognize_doubletap_gesture(false);
+            ios_launcher::present();
         }
         drop(window_step);
         horizon_client::telemetry::note_display(&window);

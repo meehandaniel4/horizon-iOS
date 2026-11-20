@@ -24,6 +24,25 @@ app=$stage/Payload/Horizon.app
 mkdir -p "$app"
 cp "$binary" "$app/horizon-client"
 chmod 755 "$app/horizon-client"
+
+# Build embedded HorizonLauncherKit.framework if Launcher source files exist
+if [[ -d "$here/Launcher" ]]; then
+  framework_dir="$app/Frameworks/HorizonLauncherKit.framework"
+  mkdir -p "$framework_dir"
+  echo "Compiling HorizonLauncherKit.framework..."
+  xcrun --sdk iphoneos swiftc -target arm64-apple-ios15.0 -O -emit-library \
+    -module-name HorizonLauncherKit \
+    -install_name @rpath/HorizonLauncherKit.framework/HorizonLauncherKit \
+    -o "$framework_dir/HorizonLauncherKit" \
+    "$here"/Launcher/*.swift \
+    -framework UIKit -framework SwiftUI -framework Foundation -framework Security -framework UniformTypeIdentifiers -framework Compression
+  chmod 755 "$framework_dir/HorizonLauncherKit"
+  cp "$here/Launcher/Info.plist" "$framework_dir/Info.plist"
+  plutil -lint "$framework_dir/Info.plist"
+
+  # Ensure rpath is set on horizon-client
+  install_name_tool -add_rpath @executable_path/Frameworks "$app/horizon-client" 2>/dev/null || true
+fi
 instance=${IOS_INSTANCE:-}
 [[ -z "$instance" || "$instance" =~ ^[0-9]{4,12}$ ]] || { echo "IOS_INSTANCE must be 4-12 digits" >&2; exit 1; }
 if [[ -n "$instance" ]]; then
@@ -42,6 +61,9 @@ sips -z 120 120 "$icon" --out "$app/AppIcon60x60@2x.png" >/dev/null
 sips -z 180 180 "$icon" --out "$app/AppIcon60x60@3x.png" >/dev/null
 
 if [[ -n "${IOS_SIGN_IDENTITY:-}" ]]; then
+  if [[ -d "$app/Frameworks/HorizonLauncherKit.framework" ]]; then
+    codesign --force --sign "$IOS_SIGN_IDENTITY" --timestamp=none "$app/Frameworks/HorizonLauncherKit.framework"
+  fi
   cp "$IOS_PROVISIONING_PROFILE" "$app/embedded.mobileprovision"
   codesign --force --sign "$IOS_SIGN_IDENTITY" --timestamp=none "$app"
 fi

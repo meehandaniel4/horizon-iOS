@@ -141,6 +141,7 @@ impl ApplicationHandler for Missing {
                     window.set_prefers_status_bar_hidden(true);
                     window.set_preferred_screen_edges_deferring_system_gestures(ScreenEdge::ALL);
                     window.recognize_doubletap_gesture(false);
+                    super::ios_launcher::present();
                 }
                 let window = Arc::new(window);
                 let renderer = loading_renderer(
