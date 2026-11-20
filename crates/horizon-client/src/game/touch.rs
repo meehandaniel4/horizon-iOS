@@ -139,6 +139,10 @@ impl Game<'_> {
     /// came down while a menu was open. A finger on the controls gives none.
     pub(super) fn touch_event(&mut self, touch: Touch) -> Vec<WindowEvent> {
         self.touch_load();
+        if touch.phase == TouchPhase::Cancelled {
+            self.pad.touch.release_all();
+            let _ = self.play_mouse(MouseButton::Left, false);
+        }
         // The mods screen and the title screen's button for it.
         if self.mods_touch(&touch) {
             return Vec::new();
@@ -222,6 +226,7 @@ impl Game<'_> {
         let Some(layout) = layout else {
             if self.pad.touch.active() {
                 self.pad.touch.release_all();
+                let _ = self.play_mouse(MouseButton::Left, false);
             }
             self.pad.touch_state = PadState::default();
             return;
@@ -271,6 +276,16 @@ impl Game<'_> {
             }
         }
         self.pad.touch_state = state;
+        for action in frame.mouse_actions {
+            match action {
+                horizon_client_input::touch::TouchMouseAction::Press(button) => {
+                    let _ = self.play_mouse(button, true);
+                }
+                horizon_client_input::touch::TouchMouseAction::Release(button) => {
+                    let _ = self.play_mouse(button, false);
+                }
+            }
+        }
         if frame.look != (0.0, 0.0) {
             self.look_turn(
                 f64::from(frame.look.0) * LOOK_SPEED,

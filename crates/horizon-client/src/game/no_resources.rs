@@ -121,11 +121,27 @@ impl ApplicationHandler for Missing {
         let attributes = Window::default_attributes()
             .with_title("Horizon")
             .with_window_icon(horizon_client::window::icon());
+        #[cfg(target_os = "ios")]
+        let attributes = {
+            use winit::platform::ios::{ScreenEdge, WindowAttributesExtIOS};
+            attributes
+                .with_prefers_home_indicator_hidden(true)
+                .with_prefers_status_bar_hidden(true)
+                .with_preferred_screen_edges_deferring_system_gestures(ScreenEdge::ALL)
+        };
         let attributes = super::window_size(attributes, [1040.0, 700.0]);
         let made = event_loop
             .create_window(attributes)
             .map_err(Into::into)
             .and_then(|window| {
+                #[cfg(target_os = "ios")]
+                {
+                    use winit::platform::ios::{ScreenEdge, WindowExtIOS};
+                    window.set_prefers_home_indicator_hidden(true);
+                    window.set_prefers_status_bar_hidden(true);
+                    window.set_preferred_screen_edges_deferring_system_gestures(ScreenEdge::ALL);
+                    window.recognize_doubletap_gesture(false);
+                }
                 let window = Arc::new(window);
                 let renderer = loading_renderer(
                     window.clone(),

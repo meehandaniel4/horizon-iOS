@@ -196,23 +196,45 @@ fn dragging_the_view_turns_it_by_the_distance_dragged() {
 }
 
 #[test]
-fn a_quick_tap_on_the_view_uses_and_holding_still_attacks() {
+fn a_quick_tap_on_the_view_attacks_and_holding_mines() {
     let l = layout();
     let now = Instant::now();
     let mut t = TouchControls::default();
+    // Quick single tap (< 180 ms): hits/attacks with LMB, releases after 40 ms
     t.touch(&l, 1, Started, (400.0, 100.0), now);
-    t.touch(&l, 1, Ended, (401.0, 100.0), after(now, 100));
-    assert_eq!(t.frame(&l, after(now, 120)).held, [TouchButton::Use]);
+    t.touch(&l, 1, Ended, (401.0, 100.0), after(now, 50));
+    let f1 = t.frame(&l, after(now, 50));
+    assert_eq!(f1.mouse_actions, [TouchMouseAction::Press(MouseButton::Left)]);
+    assert!(t.frame(&l, after(now, 70)).mouse_actions.is_empty());
+    let f2 = t.frame(&l, after(now, 95));
+    assert_eq!(f2.mouse_actions, [TouchMouseAction::Release(MouseButton::Left)]);
 
+    // Hold (>= 180 ms): starts mining
     let mut t = TouchControls::default();
     t.touch(&l, 2, Started, (400.0, 100.0), now);
-    assert!(t.frame(&l, after(now, 100)).held.is_empty());
-    assert_eq!(t.frame(&l, after(now, 400)).held, [TouchButton::Attack]);
-    // Moving while breaking keeps breaking (and turns the view).
-    t.touch(&l, 2, Moved, (450.0, 100.0), after(now, 400));
-    assert_eq!(t.frame(&l, after(now, 400)).held, [TouchButton::Attack]);
+    assert!(t.frame(&l, after(now, 100)).mouse_actions.is_empty());
+    let f3 = t.frame(&l, after(now, 185));
+    assert_eq!(f3.mouse_actions, [TouchMouseAction::Press(MouseButton::Left)]);
+    // Moving while breaking keeps breaking (and turns the view)
+    t.touch(&l, 2, Moved, (450.0, 100.0), after(now, 250));
+    let f4 = t.frame(&l, after(now, 250));
+    assert_eq!(f4.look, (50.0, 0.0));
+    assert!(f4.mouse_actions.is_empty()); // Still holding LMB
     t.touch(&l, 2, Ended, (450.0, 100.0), after(now, 400));
-    assert!(t.frame(&l, after(now, 600)).held.is_empty());
+    let f5 = t.frame(&l, after(now, 400));
+    assert_eq!(f5.mouse_actions, [TouchMouseAction::Release(MouseButton::Left)]);
+
+    // Dragging (> TOUCH_SLOP before 180 ms): enters Dragging, turns view, no LMB click
+    let mut t = TouchControls::default();
+    t.touch(&l, 3, Started, (400.0, 100.0), now);
+    t.touch(&l, 3, Moved, (420.0, 100.0), after(now, 50)); // Moved 20 pt > TOUCH_SLOP (9 pt)
+    let f6 = t.frame(&l, after(now, 50));
+    assert_eq!(f6.look, (20.0, 0.0));
+    assert!(f6.mouse_actions.is_empty());
+    // After 180 ms, no mining because it's Dragging
+    assert!(t.frame(&l, after(now, 200)).mouse_actions.is_empty());
+    t.touch(&l, 3, Ended, (420.0, 100.0), after(now, 250));
+    assert!(t.frame(&l, after(now, 250)).mouse_actions.is_empty());
 }
 
 #[test]

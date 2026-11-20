@@ -17588,6 +17588,14 @@ impl ApplicationHandler for Game<'_> {
         let attributes = winit::platform::wayland::WindowAttributesExtWayland::with_name(
             attributes, "horizon", "horizon",
         );
+        #[cfg(target_os = "ios")]
+        let attributes = {
+            use winit::platform::ios::{ScreenEdge, WindowAttributesExtIOS};
+            attributes
+                .with_prefers_home_indicator_hidden(true)
+                .with_prefers_status_bar_hidden(true)
+                .with_preferred_screen_edges_deferring_system_gestures(ScreenEdge::ALL)
+        };
         // `--offscreen` renders into a texture: its window would only show white.
         let window_step = startup::step("window.create");
         let window = match event_loop.create_window(
@@ -17602,6 +17610,14 @@ impl ApplicationHandler for Game<'_> {
                 return;
             }
         };
+        #[cfg(target_os = "ios")]
+        {
+            use winit::platform::ios::{ScreenEdge, WindowExtIOS};
+            window.set_prefers_home_indicator_hidden(true);
+            window.set_prefers_status_bar_hidden(true);
+            window.set_preferred_screen_edges_deferring_system_gestures(ScreenEdge::ALL);
+            window.recognize_doubletap_gesture(false);
+        }
         drop(window_step);
         horizon_client::telemetry::note_display(&window);
         match self.new_renderer(window.clone()) {
@@ -17626,6 +17642,10 @@ impl ApplicationHandler for Game<'_> {
         // else the first finger is the mouse (touch.rs).
         #[cfg(target_os = "ios")]
         if let WindowEvent::Touch(touch) = event {
+            if touch.phase == winit::event::TouchPhase::Cancelled {
+                self.pad.touch.release_all();
+                let _ = self.play_mouse(winit::event::MouseButton::Left, false);
+            }
             let lifted = touch.phase == winit::event::TouchPhase::Ended;
             let events = self.touch_event(touch);
             let clicked = lifted && !events.is_empty();
@@ -18136,6 +18156,8 @@ impl Game<'_> {
                     if focused {
                         self.regrab_on_refocus();
                     } else {
+                        self.pad.touch.release_all();
+                        let _ = self.play_mouse(MouseButton::Left, false);
                         // A held pointer goes with the focus, wherever the
                         // system keeps the grab: the window asks for it back
                         // when the focus returns (`regrab_on_refocus`).
@@ -18511,9 +18533,14 @@ impl Game<'_> {
                     }
                     match self.screen {
                         Screen::Playing => {
+                            #[cfg(not(target_os = "ios"))]
                             if pressed && !self.captured {
                                 self.capture(true);
                                 return Ok(());
+                            }
+                            #[cfg(target_os = "ios")]
+                            if !self.captured {
+                                self.capture(true);
                             }
                             self.extras_mouse(button, pressed);
                             if pressed
@@ -21713,6 +21740,14 @@ impl Loading {
         let attributes = winit::platform::wayland::WindowAttributesExtWayland::with_name(
             attributes, "horizon", "horizon",
         );
+        #[cfg(target_os = "ios")]
+        let attributes = {
+            use winit::platform::ios::{ScreenEdge, WindowAttributesExtIOS};
+            attributes
+                .with_prefers_home_indicator_hidden(true)
+                .with_prefers_status_bar_hidden(true)
+                .with_preferred_screen_edges_deferring_system_gestures(ScreenEdge::ALL)
+        };
         // `--offscreen` renders into a texture: its window would only show white.
         let window_step = startup::step("window.create");
         let window = match event_loop.create_window(
@@ -21727,6 +21762,14 @@ impl Loading {
                 return;
             }
         };
+        #[cfg(target_os = "ios")]
+        {
+            use winit::platform::ios::{ScreenEdge, WindowExtIOS};
+            window.set_prefers_home_indicator_hidden(true);
+            window.set_prefers_status_bar_hidden(true);
+            window.set_preferred_screen_edges_deferring_system_gestures(ScreenEdge::ALL);
+            window.recognize_doubletap_gesture(false);
+        }
         drop(window_step);
         horizon_client::telemetry::note_display(&window);
         // The renderer takes seconds to build and winit's window sits white

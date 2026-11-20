@@ -12,7 +12,7 @@
 //! notch and the home bar).
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use winit::event::TouchPhase;
+use winit::event::{MouseButton, TouchPhase};
 
 /// An on-screen button while playing. The game presses the controller
 /// button bound to `action()`, so a rebind in the controller settings moves
@@ -300,12 +300,12 @@ pub const STICK_RADIUS: f32 = 26.0;
 const BIG: f32 = 30.0;
 const SMALL: f32 = 22.0;
 const GAP: f32 = 4.0;
-/// A finger that moved less than this is still a tap or a hold.
-const STILL: f32 = 6.0;
-/// Shorter than this, a touch on the view is a tap (use).
-const TAP: Duration = Duration::from_millis(250);
-/// Held still this long, a touch on the view attacks (breaks a block).
-const HOLD: Duration = Duration::from_millis(300);
+/// A finger that moved further than this before HOLD enters Dragging instead of Mining.
+pub const TOUCH_SLOP: f32 = 9.0;
+/// Held this long without moving beyond touch slop, a touch on the view enters mining.
+pub const HOLD: Duration = Duration::from_millis(180);
+/// Duration of a quick tap attack click (held so the engine registers the click).
+pub const ATTACK_PULSE: Duration = Duration::from_millis(40);
 /// A tapped button stays down this long: the game samples keys once a tick (50 ms).
 const PULSE: Duration = Duration::from_millis(80);
 
@@ -587,6 +587,13 @@ pub struct EditorView {
     pub placement: Placement,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LookState {
+    Pending,
+    Dragging,
+    Mining,
+}
+
 #[derive(Clone, Copy, Debug)]
 enum Role {
     Stick {
@@ -597,12 +604,18 @@ enum Role {
         last: (f32, f32),
         start: (f32, f32),
         since: Instant,
-        moved: bool,
-        attacking: bool,
+        state: LookState,
     },
     Button(TouchButton),
     /// A finger on the hotbar picks its slot as it lands and then does nothing.
     Hotbar,
+}
+
+/// A mouse action to execute (press or release).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TouchMouseAction {
+    Press(MouseButton),
+    Release(MouseButton),
 }
 
 /// What the controls want this frame.
@@ -616,6 +629,8 @@ pub struct TouchFrame {
     pub look: (f32, f32),
     /// A hotbar slot tapped since the last frame.
     pub slot: Option<usize>,
+    /// Mouse actions triggered this frame (e.g. Bedrock tap attack and mining).
+    pub mouse_actions: Vec<TouchMouseAction>,
 }
 
 /// The on-screen controls while playing, and their layout editor.
@@ -637,6 +652,9 @@ pub struct TouchControls {
     pulses: Vec<(TouchButton, Instant)>,
     look: (f32, f32),
     slot: Option<usize>,
+    mouse_actions: Vec<TouchMouseAction>,
+    tap_releases: Vec<(MouseButton, Instant)>,
+    mining_touches: usize,
 }
 
 impl TouchControls {
@@ -712,8 +730,7 @@ impl TouchControls {
                         last: at,
                         start: at,
                         since: now,
-                        moved: false,
-                        attacking: false,
+                        state: LookState::Pending,
                     }
                 };
                 self.fingers.insert(id, role);
@@ -721,30 +738,41 @@ impl TouchControls {
             Moved => match self.fingers.get_mut(&id) {
                 Some(Role::Stick { at: stick, .. }) => *stick = at,
                 Some(Role::Look {
-                    last, start, moved, ..
+                    last,
+                    start,
+                    state,
+                    ..
                 }) => {
                     self.look.0 += at.0 - last.0;
                     self.look.1 += at.1 - last.1;
                     *last = at;
-                    if distance(*start, at) > STILL {
-                        *moved = true;
+                    if *state == LookState::Pending && distance(*start, at) > TOUCH_SLOP {
+                        *state = LookState::Dragging;
                     }
                 }
                 _ => {}
             },
             Ended | Cancelled => {
-                if let Some(Role::Look {
-                    since,
-                    moved,
-                    attacking,
-                    ..
-                }) = self.fingers.remove(&id)
-                    && phase == Ended
-                    && !moved
-                    && !attacking
-                    && now.duration_since(since) < TAP
-                {
-                    self.pulse(TouchButton::Use, now);
+                if let Some(Role::Look { state, .. }) = self.fingers.remove(&id) {
+                    match state {
+                        LookState::Mining => {
+                            if self.mining_touches > 0 {
+                                self.mining_touches -= 1;
+                                if self.mining_touches == 0 {
+                                    self.mouse_actions
+                                        .push(TouchMouseAction::Release(MouseButton::Left));
+                                }
+                            }
+                        }
+                        LookState::Pending if phase == Ended => {
+                            // Quick single tap (< 180 ms without move beyond touchSlop): attack hit
+                            self.mouse_actions
+                                .push(TouchMouseAction::Press(MouseButton::Left));
+                            self.tap_releases
+                                .push((MouseButton::Left, now + ATTACK_PULSE));
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
@@ -842,10 +870,17 @@ impl TouchControls {
 
     /// Lets go of everything (a menu opened, the app went to the background).
     pub fn release_all(&mut self) {
+        let was_mining = self.mining_touches > 0 || !self.tap_releases.is_empty();
         self.fingers.clear();
         self.pulses.clear();
+        self.mining_touches = 0;
+        self.tap_releases.clear();
         self.look = (0.0, 0.0);
         self.slot = None;
+        if was_mining {
+            self.mouse_actions
+                .push(TouchMouseAction::Release(MouseButton::Left));
+        }
         if let Some(editor) = &mut self.editor {
             editor.drag = None;
         }
@@ -900,18 +935,32 @@ impl TouchControls {
                 }
                 Role::Look {
                     since,
-                    moved,
-                    attacking,
+                    state,
                     ..
                 } => {
-                    if *attacking || (!*moved && now.duration_since(*since) >= HOLD) {
-                        *attacking = true;
-                        held.push(TouchButton::Attack);
+                    if *state == LookState::Pending && now.duration_since(*since) >= HOLD {
+                        *state = LookState::Mining;
+                        self.mining_touches += 1;
+                        if self.mining_touches == 1 {
+                            self.mouse_actions
+                                .push(TouchMouseAction::Press(MouseButton::Left));
+                        }
                     }
                 }
                 _ => {}
             }
         }
+        self.tap_releases.retain(|(btn, until)| {
+            if *until <= now {
+                if self.mining_touches == 0 {
+                    self.mouse_actions
+                        .push(TouchMouseAction::Release(*btn));
+                }
+                false
+            } else {
+                true
+            }
+        });
         if self.sneaking && !self.sneak_taps {
             held.push(TouchButton::Sneak);
         }
@@ -922,6 +971,7 @@ impl TouchControls {
             stick,
             look: std::mem::take(&mut self.look),
             slot: self.slot.take(),
+            mouse_actions: std::mem::take(&mut self.mouse_actions),
         }
     }
 }
