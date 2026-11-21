@@ -31,6 +31,7 @@ pub struct TouchMouse {
     start: (f64, f64),
     last: (f64, f64),
     mode: TouchMouseMode,
+    direct: bool,
 }
 
 impl Default for TouchMouse {
@@ -40,11 +41,21 @@ impl Default for TouchMouse {
             start: (0.0, 0.0),
             last: (0.0, 0.0),
             mode: TouchMouseMode::Pending,
+            direct: false,
         }
     }
 }
 
 impl TouchMouse {
+    /// Sets whether touches immediately act as direct mouse input (for crafting and containers).
+    pub fn set_direct(&mut self, direct: bool) {
+        if self.direct != direct {
+            self.direct = direct;
+            if !direct && self.mode == TouchMouseMode::Dragging {
+                self.mode = TouchMouseMode::Pending;
+            }
+        }
+    }
     /// The finger acting as the mouse.
     pub fn finger(&self) -> Option<u64> {
         self.finger
@@ -87,6 +98,32 @@ impl TouchMouse {
             state,
             button: MouseButton::Left,
         };
+        if self.direct {
+            return match phase {
+                TouchPhase::Started if self.finger.is_none() => {
+                    self.finger = Some(id);
+                    self.start = (location.x, location.y);
+                    self.last = (location.x, location.y);
+                    self.mode = TouchMouseMode::Dragging;
+                    vec![moved, button(ElementState::Pressed)]
+                }
+                TouchPhase::Moved if self.finger == Some(id) => {
+                    self.last = (location.x, location.y);
+                    vec![moved]
+                }
+                TouchPhase::Ended if self.finger == Some(id) => {
+                    self.finger = None;
+                    self.mode = TouchMouseMode::Pending;
+                    vec![moved, button(ElementState::Released)]
+                }
+                TouchPhase::Cancelled if self.finger == Some(id) => {
+                    self.finger = None;
+                    self.mode = TouchMouseMode::Pending;
+                    vec![button(ElementState::Released)]
+                }
+                _ => Vec::new(),
+            };
+        }
         match phase {
             TouchPhase::Started if self.finger.is_none() => {
                 self.finger = Some(id);
@@ -104,7 +141,7 @@ impl TouchMouse {
 
                 let mut out = Vec::new();
                 if self.mode == TouchMouseMode::Pending && dist > MENU_TOUCH_SLOP {
-                    if dy.abs() >= dx.abs() {
+                    if dy.abs() >= dx.abs() * 0.7 {
                         self.mode = TouchMouseMode::Scrolling;
                     } else {
                         self.mode = TouchMouseMode::Dragging;
@@ -276,6 +313,24 @@ mod tests {
         assert_eq!(
             outs(t.translate(touch(2, TouchPhase::Started, 3.0, 4.0))),
             [Out::Move(3.0, 4.0)]
+        );
+    }
+
+    #[test]
+    fn direct_mode_presses_on_start_and_releases_on_end_for_crafting() {
+        let mut t = TouchMouse::default();
+        t.set_direct(true);
+        assert_eq!(
+            outs(t.translate(touch(1, TouchPhase::Started, 10.0, 20.0))),
+            [Out::Move(10.0, 20.0), Out::Button(ElementState::Pressed)]
+        );
+        assert_eq!(
+            outs(t.translate(touch(1, TouchPhase::Moved, 15.0, 30.0))),
+            [Out::Move(15.0, 30.0)]
+        );
+        assert_eq!(
+            outs(t.translate(touch(1, TouchPhase::Ended, 20.0, 40.0))),
+            [Out::Move(20.0, 40.0), Out::Button(ElementState::Released)]
         );
     }
 

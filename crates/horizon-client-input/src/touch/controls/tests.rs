@@ -200,16 +200,16 @@ fn a_quick_tap_on_the_view_attacks_and_holding_mines() {
     let l = layout();
     let now = Instant::now();
     let mut t = TouchControls::default();
-    // Quick single tap (< 180 ms): hits/attacks with LMB, releases after 40 ms
+    // Quick single tap (< 180 ms): uses/places with RMB, releases after 40 ms
     t.touch(&l, 1, Started, (400.0, 100.0), now);
     t.touch(&l, 1, Ended, (401.0, 100.0), after(now, 50));
     let f1 = t.frame(&l, after(now, 50));
-    assert_eq!(f1.mouse_actions, [TouchMouseAction::Press(MouseButton::Left)]);
+    assert_eq!(f1.mouse_actions, [TouchMouseAction::Press(MouseButton::Right)]);
     assert!(t.frame(&l, after(now, 70)).mouse_actions.is_empty());
     let f2 = t.frame(&l, after(now, 95));
-    assert_eq!(f2.mouse_actions, [TouchMouseAction::Release(MouseButton::Left)]);
+    assert_eq!(f2.mouse_actions, [TouchMouseAction::Release(MouseButton::Right)]);
 
-    // Hold (>= 180 ms): starts mining
+    // Hold (>= 180 ms): starts mining with LMB when held_usable is false
     let mut t = TouchControls::default();
     t.touch(&l, 2, Started, (400.0, 100.0), now);
     assert!(t.frame(&l, after(now, 100)).mouse_actions.is_empty());
@@ -223,6 +223,16 @@ fn a_quick_tap_on_the_view_attacks_and_holding_mines() {
     t.touch(&l, 2, Ended, (450.0, 100.0), after(now, 400));
     let f5 = t.frame(&l, after(now, 400));
     assert_eq!(f5.mouse_actions, [TouchMouseAction::Release(MouseButton::Left)]);
+
+    // Hold (>= 180 ms) with food/usable item: eats/drinks/uses with RMB
+    let mut t_food = TouchControls::default();
+    t_food.held_usable = true;
+    t_food.touch(&l, 4, Started, (400.0, 100.0), now);
+    let f_food = t_food.frame(&l, after(now, 185));
+    assert_eq!(f_food.mouse_actions, [TouchMouseAction::Press(MouseButton::Right)]);
+    t_food.touch(&l, 4, Ended, (400.0, 100.0), after(now, 300));
+    let f_food_end = t_food.frame(&l, after(now, 300));
+    assert_eq!(f_food_end.mouse_actions, [TouchMouseAction::Release(MouseButton::Right)]);
 
     // Dragging (> TOUCH_SLOP before 180 ms): enters Dragging, turns view, no LMB click
     let mut t = TouchControls::default();
@@ -463,7 +473,7 @@ fn the_settings_file_reads_back_what_it_wrote() {
     let text = s.to_text();
     assert_eq!(
         text,
-        "jump=0.9000,0.7500,1.30,0.60,0\ndrop=-,-,1.00,1.00,1\nhotbar=0.5000,0.2000,1.00,1.00,0\n"
+        "sensitivity=1.00\njump=0.9000,0.7500,1.30,0.60,0\ndrop=-,-,1.00,1.00,1\nhotbar=0.5000,0.2000,1.00,1.00,0\n"
     );
     assert_eq!(TouchSettings::parse(&text), s);
 }

@@ -34,11 +34,15 @@ pub enum TouchButton {
     Debug,
     /// Held while the stick is pushed fully forward; not on screen.
     Sprint,
+    /// Swap item with offhand (F / key.swapOffhand).
+    SwapHands,
+    /// Zoom in (Z / zoom).
+    Zoom,
 }
 
 impl TouchButton {
     /// The buttons on screen, in the order they are laid out.
-    pub const PLACED: [TouchButton; 11] = [
+    pub const PLACED: [TouchButton; 13] = [
         Self::Jump,
         Self::Sneak,
         Self::Attack,
@@ -50,6 +54,8 @@ impl TouchButton {
         Self::Edit,
         Self::Debug,
         Self::Inventory,
+        Self::SwapHands,
+        Self::Zoom,
     ];
 
     /// The key mapping it stands for; `None` for pause (the controller's
@@ -66,7 +72,8 @@ impl TouchButton {
             Self::Drop => "key.drop",
             Self::Perspective => "key.togglePerspective",
             Self::Sprint => "key.sprint",
-            Self::Pause | Self::Edit | Self::Debug => return None,
+            Self::SwapHands => "key.swapOffhand",
+            Self::Zoom | Self::Pause | Self::Edit | Self::Debug => return None,
         })
     }
 
@@ -85,6 +92,8 @@ impl TouchButton {
             Self::Edit => "edit",
             Self::Debug => "debug",
             Self::Sprint => "sprint",
+            Self::SwapHands => "swap_hands",
+            Self::Zoom => "zoom",
         }
     }
 }
@@ -129,6 +138,8 @@ impl Control {
             Self::Button(TouchButton::Edit) => "horizon.touch.edit",
             Self::Button(TouchButton::Debug) => "horizon.touch.debug",
             Self::Button(TouchButton::Sprint) => "key.sprint",
+            Self::Button(TouchButton::SwapHands) => "horizon.touch.swap",
+            Self::Button(TouchButton::Zoom) => "horizon.touch.zoom",
             Self::Stick => "horizon.touch.stick",
             Self::Hotbar => "horizon.touch.hotbar",
         }
@@ -176,9 +187,19 @@ impl Default for Placement {
 }
 
 /// The saved layout: each control's placement where it differs from the default.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TouchSettings {
     placements: HashMap<Control, Placement>,
+    pub sensitivity: f32,
+}
+
+impl Default for TouchSettings {
+    fn default() -> Self {
+        Self {
+            placements: HashMap::new(),
+            sensitivity: 1.0,
+        }
+    }
 }
 
 impl TouchSettings {
@@ -200,7 +221,16 @@ impl TouchSettings {
     pub fn parse(text: &str) -> Self {
         let mut settings = Self::default();
         for line in text.lines() {
-            let Some((name, value)) = line.trim().split_once('=') else {
+            let line = line.trim();
+            if let Some(val) = line.strip_prefix("sensitivity=") {
+                if let Ok(s) = val.trim().parse::<f32>() {
+                    if s.is_finite() {
+                        settings.sensitivity = s.clamp(0.1, 3.0);
+                    }
+                }
+                continue;
+            }
+            let Some((name, value)) = line.split_once('=') else {
                 continue;
             };
             let Some(control) = Control::all().find(|c| c.key() == name.trim()) else {
@@ -234,6 +264,7 @@ impl TouchSettings {
     /// The settings file's text ([`parse`](Self::parse) reads it back).
     pub fn to_text(&self) -> String {
         let mut out = String::new();
+        out.push_str(&format!("sensitivity={:.2}\n", self.sensitivity));
         for control in Control::all() {
             let Some(p) = self.placements.get(&control) else {
                 continue;
@@ -422,6 +453,8 @@ impl Layout {
             Control::Button(TouchButton::Perspective) => top(2.0),
             Control::Button(TouchButton::Edit) => top(3.0),
             Control::Button(TouchButton::Debug) => top(4.0),
+            Control::Button(TouchButton::SwapHands) => big(col(1.0), row(2.0)),
+            Control::Button(TouchButton::Zoom) => big(col(0.0), row(3.0)),
             Control::Button(TouchButton::Inventory | TouchButton::Sprint) => Area {
                 x: hotbar.x + hotbar.w + GAP,
                 y: hotbar.y,
@@ -432,11 +465,17 @@ impl Layout {
             Control::Hotbar => hotbar,
         };
         let items = Control::all()
-            .map(|control| Item {
-                control,
-                area: area(control),
-                opacity: 1.0,
-                hidden: false,
+            .map(|control| {
+                let hidden = matches!(
+                    control,
+                    Control::Button(TouchButton::SwapHands | TouchButton::Zoom)
+                );
+                Item {
+                    control,
+                    area: area(control),
+                    opacity: 1.0,
+                    hidden,
+                }
             })
             .collect();
         let r = STICK_RADIUS;
@@ -514,17 +553,23 @@ pub enum EditorButton {
     Fainter,
     Stronger,
     Hide,
+    Add,
+    SensDown,
+    SensUp,
     Reset,
     Done,
 }
 
 impl EditorButton {
-    pub const ALL: [EditorButton; 7] = [
+    pub const ALL: [EditorButton; 10] = [
         Self::Smaller,
         Self::Bigger,
         Self::Fainter,
         Self::Stronger,
         Self::Hide,
+        Self::Add,
+        Self::SensDown,
+        Self::SensUp,
         Self::Reset,
         Self::Done,
     ];
@@ -538,29 +583,128 @@ impl EditorButton {
             Self::Stronger => "horizon.touch.edit.stronger",
             Self::Hide if hidden => "horizon.touch.edit.show",
             Self::Hide => "horizon.touch.edit.hide",
+            Self::Add => "horizon.touch.edit.add",
+            Self::SensDown => "horizon.touch.edit.sens_down",
+            Self::SensUp => "horizon.touch.edit.sens_up",
             Self::Reset => "horizon.touch.edit.reset",
             Self::Done => "horizon.touch.edit.done",
         }
     }
 
-    /// The toolbar across the safe area, centred, below the top row of buttons.
+    /// The toolbar buttons across the safe area in two rows.
     pub fn toolbar(layout: &Layout) -> Vec<(EditorButton, Area)> {
-        let (w, h) = (56.0, 18.0);
-        let total = Self::ALL.len() as f32 * (w + GAP) - GAP;
-        let x0 = (layout.safe.x + (layout.safe.w - total) / 2.0).max(layout.safe.x);
-        Self::ALL
+        let (w1, h1) = (48.0, 18.0);
+        let row1 = [
+            Self::Smaller,
+            Self::Bigger,
+            Self::Fainter,
+            Self::Stronger,
+            Self::Hide,
+            Self::Add,
+            Self::Done,
+        ];
+        let total1 = row1.len() as f32 * (w1 + GAP) - GAP;
+        let x0 = (layout.safe.x + (layout.safe.w - total1) / 2.0).max(layout.safe.x);
+        let y0 = layout.safe.y + GAP + SMALL + GAP * 2.0;
+
+        let mut out: Vec<(EditorButton, Area)> = row1
             .iter()
             .enumerate()
             .map(|(i, b)| {
-                let area = Area {
-                    x: x0 + i as f32 * (w + GAP),
-                    y: layout.safe.y + GAP + SMALL + GAP * 2.0,
-                    w,
-                    h,
-                };
-                (*b, area)
+                (
+                    *b,
+                    Area {
+                        x: x0 + i as f32 * (w1 + GAP),
+                        y: y0,
+                        w: w1,
+                        h: h1,
+                    },
+                )
             })
-            .collect()
+            .collect();
+
+        // Row 2: SensDown, SensUp, Reset
+        let (w2, h2) = (56.0, 18.0);
+        let total2 = 3.0 * w2 + 60.0 + 3.0 * GAP;
+        let x2 = (layout.safe.x + (layout.safe.w - total2) / 2.0).max(layout.safe.x);
+        let y2 = y0 + h1 + GAP;
+
+        out.push((
+            Self::SensDown,
+            Area {
+                x: x2,
+                y: y2,
+                w: w2,
+                h: h2,
+            },
+        ));
+        out.push((
+            Self::SensUp,
+            Area {
+                x: x2 + w2 + GAP + 60.0 + GAP,
+                y: y2,
+                w: w2,
+                h: h2,
+            },
+        ));
+        out.push((
+            Self::Reset,
+            Area {
+                x: x2 + (w2 + GAP) * 2.0 + 60.0,
+                y: y2,
+                w: w2,
+                h: h2,
+            },
+        ));
+
+        out
+    }
+
+    /// Area for displaying sensitivity value between SensDown and SensUp.
+    pub fn sens_display_area(layout: &Layout) -> Area {
+        let y0 = layout.safe.y + GAP + SMALL + GAP * 2.0;
+        let (w2, h2) = (56.0, 18.0);
+        let total2 = 3.0 * w2 + 60.0 + 3.0 * GAP;
+        let x2 = (layout.safe.x + (layout.safe.w - total2) / 2.0).max(layout.safe.x);
+        let y2 = y0 + 18.0 + GAP;
+        Area {
+            x: x2 + w2 + GAP,
+            y: y2,
+            w: 60.0,
+            h: h2,
+        }
+    }
+}
+
+impl Layout {
+    /// Dialog box and option areas for adding extra buttons (F, Z, Close).
+    pub fn add_dialog_areas(&self) -> (Area, Area, Area, Area) {
+        let (w, h) = (200.0, 92.0);
+        let box_area = Area {
+            x: self.safe.x + (self.safe.w - w) / 2.0,
+            y: self.safe.y + (self.safe.h - h) / 2.0,
+            w,
+            h,
+        };
+        let f_btn = Area {
+            x: box_area.x + 8.0,
+            y: box_area.y + 10.0,
+            w: w - 16.0,
+            h: 22.0,
+        };
+        let z_btn = Area {
+            x: box_area.x + 8.0,
+            y: box_area.y + 36.0,
+            w: w - 16.0,
+            h: 22.0,
+        };
+        let close_btn = Area {
+            x: box_area.x + 8.0,
+            y: box_area.y + 62.0,
+            w: w - 16.0,
+            h: 22.0,
+        };
+        (box_area, f_btn, z_btn, close_btn)
     }
 }
 
@@ -577,6 +721,7 @@ struct Editor {
     draft: TouchSettings,
     selected: Option<Control>,
     drag: Option<Drag>,
+    show_add_menu: bool,
 }
 
 /// What the editor shows.
@@ -585,6 +730,8 @@ pub struct EditorView {
     pub selected: Option<Control>,
     /// The selected control's placement.
     pub placement: Placement,
+    pub sensitivity: f32,
+    pub show_add_menu: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -605,6 +752,7 @@ enum Role {
         start: (f32, f32),
         since: Instant,
         state: LookState,
+        usable: bool,
     },
     Button(TouchButton),
     /// A finger on the hotbar picks its slot as it lands and then does nothing.
@@ -655,6 +803,9 @@ pub struct TouchControls {
     mouse_actions: Vec<TouchMouseAction>,
     tap_releases: Vec<(MouseButton, Instant)>,
     mining_touches: usize,
+    pub holding_use: bool,
+    /// Whether the held item is usable (food, bow, potion, shield).
+    pub held_usable: bool,
 }
 
 impl TouchControls {
@@ -673,6 +824,8 @@ impl TouchControls {
         self.editor.as_ref().map(|e| EditorView {
             selected: e.selected,
             placement: e.selected.map(|c| e.draft.placement(c)).unwrap_or_default(),
+            sensitivity: e.draft.sensitivity,
+            show_add_menu: e.show_add_menu,
         })
     }
 
@@ -708,6 +861,7 @@ impl TouchControls {
                                 draft: self.settings.clone(),
                                 selected: None,
                                 drag: None,
+                                show_add_menu: false,
                             });
                             return;
                         }
@@ -731,6 +885,7 @@ impl TouchControls {
                         start: at,
                         since: now,
                         state: LookState::Pending,
+                        usable: self.held_usable,
                     }
                 };
                 self.fingers.insert(id, role);
@@ -759,17 +914,24 @@ impl TouchControls {
                             if self.mining_touches > 0 {
                                 self.mining_touches -= 1;
                                 if self.mining_touches == 0 {
+                                    let btn = if self.holding_use {
+                                        self.holding_use = false;
+                                        MouseButton::Right
+                                    } else {
+                                        MouseButton::Left
+                                    };
                                     self.mouse_actions
-                                        .push(TouchMouseAction::Release(MouseButton::Left));
+                                        .push(TouchMouseAction::Release(btn));
                                 }
                             }
                         }
                         LookState::Pending if phase == Ended => {
-                            // Quick single tap (< 180 ms without move beyond touchSlop): attack hit
+                            // Quick single tap (< 180 ms without move beyond touchSlop):
+                            // Right click: place block or use/interact
                             self.mouse_actions
-                                .push(TouchMouseAction::Press(MouseButton::Left));
+                                .push(TouchMouseAction::Press(MouseButton::Right));
                             self.tap_releases
-                                .push((MouseButton::Left, now + ATTACK_PULSE));
+                                .push((MouseButton::Right, now + ATTACK_PULSE));
                         }
                         _ => {}
                     }
@@ -784,6 +946,27 @@ impl TouchControls {
         let Some(editor) = self.editor.as_mut() else {
             return;
         };
+        if editor.show_add_menu {
+            if phase == TouchPhase::Started {
+                let (box_area, f_btn, z_btn, close_btn) = layout.add_dialog_areas();
+                if f_btn.contains(at) {
+                    let mut p = editor.draft.placement(Control::Button(TouchButton::SwapHands));
+                    p.hidden = false;
+                    editor.draft.set(Control::Button(TouchButton::SwapHands), p);
+                    editor.selected = Some(Control::Button(TouchButton::SwapHands));
+                    editor.show_add_menu = false;
+                } else if z_btn.contains(at) {
+                    let mut p = editor.draft.placement(Control::Button(TouchButton::Zoom));
+                    p.hidden = false;
+                    editor.draft.set(Control::Button(TouchButton::Zoom), p);
+                    editor.selected = Some(Control::Button(TouchButton::Zoom));
+                    editor.show_add_menu = false;
+                } else if close_btn.contains(at) || !box_area.contains(at) {
+                    editor.show_add_menu = false;
+                }
+            }
+            return;
+        }
         match phase {
             TouchPhase::Started => {
                 if let Some((button, _)) = EditorButton::toolbar(layout)
@@ -840,6 +1023,31 @@ impl TouchControls {
             self.editor = None;
             return;
         }
+        if button == EditorButton::Add {
+            editor.show_add_menu = !editor.show_add_menu;
+            return;
+        }
+        if button == EditorButton::SensDown {
+            editor.draft.sensitivity =
+                (((editor.draft.sensitivity - 0.05) * 100.0).round() / 100.0).clamp(0.10, 3.00);
+            return;
+        }
+        if button == EditorButton::SensUp {
+            editor.draft.sensitivity =
+                (((editor.draft.sensitivity + 0.05) * 100.0).round() / 100.0).clamp(0.10, 3.00);
+            return;
+        }
+        if button == EditorButton::Reset {
+            if let Some(c) = editor.selected {
+                editor.draft.set(c, Placement::default());
+            } else {
+                for c in Control::all() {
+                    editor.draft.set(c, Placement::default());
+                }
+                editor.draft.sensitivity = 1.0;
+            }
+            return;
+        }
         let targets: Vec<Control> = match editor.selected {
             Some(c) => vec![c],
             None if button == EditorButton::Hide => Vec::new(),
@@ -857,7 +1065,6 @@ impl TouchControls {
                 EditorButton::Fainter => p.opacity = step(p.opacity, -STEP, OPACITIES),
                 EditorButton::Stronger => p.opacity = step(p.opacity, STEP, OPACITIES),
                 EditorButton::Hide if control.hideable() => p.hidden = !p.hidden,
-                EditorButton::Reset => p = Placement::default(),
                 _ => {}
             }
             editor.draft.set(control, p);
@@ -871,15 +1078,21 @@ impl TouchControls {
     /// Lets go of everything (a menu opened, the app went to the background).
     pub fn release_all(&mut self) {
         let was_mining = self.mining_touches > 0 || !self.tap_releases.is_empty();
+        let was_use = self.holding_use;
         self.fingers.clear();
         self.pulses.clear();
         self.mining_touches = 0;
+        self.holding_use = false;
         self.tap_releases.clear();
         self.look = (0.0, 0.0);
         self.slot = None;
         if was_mining {
-            self.mouse_actions
-                .push(TouchMouseAction::Release(MouseButton::Left));
+            let btn = if was_use {
+                MouseButton::Right
+            } else {
+                MouseButton::Left
+            };
+            self.mouse_actions.push(TouchMouseAction::Release(btn));
         }
         if let Some(editor) = &mut self.editor {
             editor.drag = None;
@@ -936,14 +1149,21 @@ impl TouchControls {
                 Role::Look {
                     since,
                     state,
+                    usable,
                     ..
                 } => {
                     if *state == LookState::Pending && now.duration_since(*since) >= HOLD {
                         *state = LookState::Mining;
                         self.mining_touches += 1;
                         if self.mining_touches == 1 {
-                            self.mouse_actions
-                                .push(TouchMouseAction::Press(MouseButton::Left));
+                            let button = if *usable {
+                                self.holding_use = true;
+                                MouseButton::Right
+                            } else {
+                                self.holding_use = false;
+                                MouseButton::Left
+                            };
+                            self.mouse_actions.push(TouchMouseAction::Press(button));
                         }
                     }
                 }

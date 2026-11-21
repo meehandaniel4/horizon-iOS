@@ -196,12 +196,15 @@ impl Game<'_> {
                     at.1
                 );
             }
+            self.pad.touch.held_usable = self.held_is_usable();
             self.pad
                 .touch
                 .touch(&layout, touch.id, touch.phase, at, Instant::now());
             self.last_input = Instant::now();
             return Vec::new();
         }
+        let is_container = matches!(self.screen, Screen::Inventory | Screen::Creative);
+        self.pad.touch_mouse.set_direct(is_container);
         self.pad.touch_mouse.translate(WindowEvent::Touch(touch))
     }
 
@@ -263,6 +266,34 @@ impl Game<'_> {
                 log::warn!("Horizon: touch F3: {e}");
             }
         }
+        // F: Swap held item with offhand (key.swapOffhand).
+        let swap = frame.held.contains(&TouchButton::SwapHands);
+        if swap != self.pad.touch_swap {
+            self.pad.touch_swap = swap;
+            if swap {
+                self.physical_keys.insert(KeyCode::KeyF);
+            } else {
+                self.physical_keys.remove(&KeyCode::KeyF);
+            }
+            self.native_key_event(KeyCode::KeyF, swap, false);
+            if let Err(e) = self.mapped_key_event(KeyCode::KeyF, swap, false) {
+                log::warn!("Horizon: touch F (swap offhand): {e}");
+            }
+        }
+        // Z: Zoom.
+        let zoom = frame.held.contains(&TouchButton::Zoom);
+        if zoom != self.pad.touch_zoom {
+            self.pad.touch_zoom = zoom;
+            if zoom {
+                self.physical_keys.insert(KeyCode::KeyZ);
+            } else {
+                self.physical_keys.remove(&KeyCode::KeyZ);
+            }
+            self.native_key_event(KeyCode::KeyZ, zoom, false);
+            if let Err(e) = self.mapped_key_event(KeyCode::KeyZ, zoom, false) {
+                log::warn!("Horizon: touch Z (zoom): {e}");
+            }
+        }
         for held in frame.held {
             let button = match held.action() {
                 Some(action) => self.settings.controller.binding(action),
@@ -288,9 +319,10 @@ impl Game<'_> {
             }
         }
         if frame.look != (0.0, 0.0) {
+            let sens = f64::from(self.pad.touch.settings.sensitivity.clamp(0.1, 3.0));
             self.look_turn(
-                f64::from(frame.look.0) * LOOK_SPEED,
-                f64::from(frame.look.1) * LOOK_SPEED,
+                f64::from(frame.look.0) * LOOK_SPEED * sens,
+                f64::from(frame.look.1) * LOOK_SPEED * sens,
             );
         }
         if let Some(slot) = frame.slot
@@ -426,6 +458,21 @@ impl Game<'_> {
             );
             bottom = bottom.max(a.y + a.h);
         }
+        let sens_area = EditorButton::sens_display_area(layout);
+        batch.fill(atlas, sens_area.x, sens_area.y, sens_area.w, sens_area.h, 0xc020_2020);
+        outline(batch, atlas, sens_area, EDGE);
+        let sens_label = format!("{:.2}x", view.sensitivity);
+        let sw = HudBatch::text_width(atlas, &sens_label);
+        batch.text(
+            atlas,
+            &sens_label,
+            sens_area.x + (sens_area.w - sw) / 2.0,
+            sens_area.y + (sens_area.h - 8.0) / 2.0,
+            INK,
+            true,
+        );
+        bottom = bottom.max(sens_area.y + sens_area.h);
+
         let caption = match view.selected {
             Some(control) => {
                 let name = horizon_client::lang::get(control.label());
@@ -451,6 +498,78 @@ impl Game<'_> {
             INK,
             true,
         );
+
+        if view.show_add_menu {
+            let (box_area, f_btn, z_btn, close_btn) = layout.add_dialog_areas();
+            batch.fill(atlas, box_area.x, box_area.y, box_area.w, box_area.h, 0xf018_1818);
+            outline(batch, atlas, box_area, SELECTED);
+
+            // Option F
+            batch.fill(atlas, f_btn.x, f_btn.y, f_btn.w, f_btn.h, 0xc030_3030);
+            outline(batch, atlas, f_btn, EDGE);
+            let f_text = horizon_client::lang::get("horizon.touch.swap");
+            let f_label = format!("+ {f_text}");
+            batch.text(
+                atlas,
+                &f_label,
+                f_btn.x + 8.0,
+                f_btn.y + (f_btn.h - 8.0) / 2.0,
+                INK,
+                true,
+            );
+
+            // Option Z
+            batch.fill(atlas, z_btn.x, z_btn.y, z_btn.w, z_btn.h, 0xc030_3030);
+            outline(batch, atlas, z_btn, EDGE);
+            let z_text = horizon_client::lang::get("horizon.touch.zoom");
+            let z_label = format!("+ {z_text}");
+            batch.text(
+                atlas,
+                &z_label,
+                z_btn.x + 8.0,
+                z_btn.y + (z_btn.h - 8.0) / 2.0,
+                INK,
+                true,
+            );
+
+            // Close
+            batch.fill(atlas, close_btn.x, close_btn.y, close_btn.w, close_btn.h, 0xc040_2020);
+            outline(batch, atlas, close_btn, EDGE);
+            let c_text = horizon_client::lang::get("gui.cancel");
+            let cw = HudBatch::text_width(atlas, &c_text);
+            batch.text(
+                atlas,
+                &c_text,
+                close_btn.x + (close_btn.w - cw) / 2.0,
+                close_btn.y + (close_btn.h - 8.0) / 2.0,
+                INK,
+                true,
+            );
+        }
+    }
+
+    /// Whether the held item is edible or usable by holding (food, potion, bow, shield, etc.).
+    pub(super) fn held_is_usable(&self) -> bool {
+        let Some(stack) = self.held() else { return false };
+        let item = stack.item.as_ref();
+        if let Some(info) = self.res.items().get(item) {
+            if info.food.is_some() {
+                return true;
+            }
+        }
+        item.ends_with("_bow")
+            || item.ends_with("bow")
+            || item.ends_with("shield")
+            || item.ends_with("potion")
+            || item.ends_with("bottle")
+            || item.ends_with("bucket")
+            || item.ends_with("spyglass")
+            || item.ends_with("trident")
+            || item.contains("apple")
+            || item.contains("bread")
+            || item.contains("meat")
+            || item.contains("stew")
+            || item.contains("soup")
     }
 }
 

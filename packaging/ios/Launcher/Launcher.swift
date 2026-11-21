@@ -25,38 +25,6 @@ enum GameFolder {
         }
         return false
     }
-
-    static func readSensitivity() -> Double {
-        guard let text = try? String(contentsOf: optionsFile, encoding: .utf8) else { return 0.5 }
-        for line in text.components(separatedBy: .newlines) {
-            if line.hasPrefix("mouseSensitivity:") {
-                let parts = line.components(separatedBy: ":")
-                if parts.count >= 2, let val = Double(parts[1].trimmingCharacters(in: .whitespaces)) {
-                    return val
-                }
-            }
-        }
-        return 0.5
-    }
-
-    static func saveSensitivity(_ val: Double) {
-        var lines: [String] = []
-        var found = false
-        if let text = try? String(contentsOf: optionsFile, encoding: .utf8) {
-            for line in text.components(separatedBy: .newlines) {
-                if line.hasPrefix("mouseSensitivity:") {
-                    lines.append("mouseSensitivity:\(String(format: "%.4f", val))")
-                    found = true
-                } else if !line.isEmpty {
-                    lines.append(line)
-                }
-            }
-        }
-        if !found {
-            lines.append("mouseSensitivity:\(String(format: "%.4f", val))")
-        }
-        try? lines.joined(separator: "\n").write(to: optionsFile, atomically: true, encoding: .utf8)
-    }
 }
 
 // MARK: - Unzip Helper
@@ -212,7 +180,6 @@ struct LauncherRootView: View {
     var onPlay: () -> Void
     @State private var tab: Int = 0
     @State private var hasFiles: Bool = GameFolder.hasGameFiles
-    @State private var sensitivity: Double = GameFolder.readSensitivity()
     @State private var importingZip: Bool = false
     @State private var isUnzipping: Bool = false
     @State private var alertMessage: String? = nil
@@ -274,7 +241,7 @@ struct LauncherRootView: View {
                 Text("Horizon")
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
-                Text("Minecraft Java • Версия 0.8.0")
+                Text("Minecraft Java • Версия 0.9.0")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.white.opacity(0.6))
             }
@@ -283,94 +250,69 @@ struct LauncherRootView: View {
     }
 
     private var playTab: some View {
-        VStack(spacing: 20) {
-            Spacer()
+        ScrollView {
+            VStack(spacing: 24) {
+                Spacer(minLength: 16)
 
-            VStack(spacing: 8) {
-                Text("Minecraft Java Edition")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                Text("Horizon Native Client (Rust)")
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.6))
-            }
-
-            HStack(spacing: 12) {
-                Image(systemName: hasFiles ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                    .font(.system(size: 24))
-                    .foregroundColor(hasFiles ? .green : .orange)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(hasFiles ? "Готово к запуску" : "Пакеты игры не установлены")
-                        .font(.system(size: 16, weight: .semibold))
+                VStack(spacing: 8) {
+                    Text("Minecraft Java Edition")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
-                    Text(hasFiles ? "Все необходимые ресурсы на месте" : "Перейдите в Настройки для выбора или загрузки zip")
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.7))
+                    Text("Horizon Native Client (Rust)")
+                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.6))
                 }
-                Spacer()
-            }
-            .padding(16)
-            .background(Color.white.opacity(0.08))
-            .cornerRadius(14)
-            .padding(.horizontal, 24)
 
-            Button(action: {
-                if hasFiles {
-                    onPlay()
-                } else {
-                    alertMessage = "Сначала загрузите пакеты игры (horizon-resources.zip) во вкладке «Настройки»."
+                HStack(spacing: 12) {
+                    Image(systemName: hasFiles ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .font(.system(size: 24))
+                        .foregroundColor(hasFiles ? .green : .orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(hasFiles ? "Готово к запуску" : "Пакеты игры не установлены")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                        Text(hasFiles ? "Все необходимые ресурсы на месте" : "Перейдите в Настройки для выбора или загрузки zip")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    Spacer()
                 }
-            }) {
-                HStack(spacing: 10) {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 20))
-                    Text("ИГРАТЬ")
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                .padding(16)
+                .background(Color.white.opacity(0.08))
+                .cornerRadius(14)
+
+                Button(action: {
+                    if hasFiles {
+                        onPlay()
+                    } else {
+                        alertMessage = "Сначала загрузите пакеты игры (horizon-resources.zip) во вкладке «Настройки»."
+                    }
+                }) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 20))
+                        Text("ИГРАТЬ")
+                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 56)
+                    .background(hasFiles ? Color(red: 0.16, green: 0.65, blue: 0.27) : Color.gray.opacity(0.4))
+                    .foregroundColor(.white)
+                    .cornerRadius(16)
+                    .shadow(color: hasFiles ? Color.green.opacity(0.3) : Color.clear, radius: 10, y: 4)
                 }
-                .frame(maxWidth: .infinity)
-                .frame(height: 56)
-                .background(hasFiles ? Color(red: 0.16, green: 0.65, blue: 0.27) : Color.gray.opacity(0.4))
-                .foregroundColor(.white)
-                .cornerRadius(16)
-                .shadow(color: hasFiles ? Color.green.opacity(0.3) : Color.clear, radius: 10, y: 4)
+
+                Spacer(minLength: 16)
             }
             .padding(.horizontal, 24)
-
-            Spacer()
+            .padding(.vertical, 8)
         }
     }
 
     private var settingsTab: some View {
         ScrollView {
             VStack(spacing: 16) {
-                // Card 1: Sensitivity (Сенса)
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "slider.horizontal.3")
-                            .foregroundColor(.green)
-                        Text("Чувствительность обзора (Сенса)")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
-                        Spacer()
-                        Text("\(Int(sensitivity * 200))%")
-                            .font(.system(size: 15, weight: .bold, design: .monospaced))
-                            .foregroundColor(.green)
-                    }
-
-                    Text("Регулировка чувствительности поворота камеры при сенсорном обзоре.")
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.65))
-
-                    Slider(value: $sensitivity, in: 0.05...1.5, step: 0.01) { _ in
-                        GameFolder.saveSensitivity(sensitivity)
-                    }
-                    .accentColor(.green)
-                }
-                .padding(16)
-                .background(Color.white.opacity(0.08))
-                .cornerRadius(14)
-
-                // Card 2: Game Packages (Пакеты игры)
+                // Game Packages (Пакеты игры)
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Image(systemName: hasFiles ? "checkmark.seal.fill" : "archivebox.fill")
@@ -536,7 +478,10 @@ final class LauncherHostingController: UIHostingController<AnyView> {
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        UIDevice.current.userInterfaceIdiom == .pad ? .all : .landscape
+        .allButUpsideDown
+    }
+    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
+        .portrait
     }
 }
 
