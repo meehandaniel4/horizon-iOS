@@ -35,7 +35,7 @@ if [[ -d "$here/Launcher" ]]; then
     -Xlinker -install_name -Xlinker @rpath/HorizonLauncherKit.framework/HorizonLauncherKit \
     -o "$framework_dir/HorizonLauncherKit" \
     "$here"/Launcher/*.swift \
-    -framework UIKit -framework SwiftUI -framework Foundation -framework Security -framework UniformTypeIdentifiers -framework Compression
+    -framework UIKit -framework SwiftUI -framework Foundation -framework Security -framework UniformTypeIdentifiers -lcompression
   chmod 755 "$framework_dir/HorizonLauncherKit"
   install_name_tool -id @rpath/HorizonLauncherKit.framework/HorizonLauncherKit "$framework_dir/HorizonLauncherKit" 2>/dev/null || true
   cp "$here/Launcher/Info.plist" "$framework_dir/Info.plist"
