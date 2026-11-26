@@ -1,0 +1,246 @@
+# Builds Horizon for iOS with native mods (packaging/ios/native-mods.md). An iPhone can't compile
+# code, so GitHub does: the mods ticked in the "Native mods for iOS" issue (or typed when run by
+# hand) are downloaded from Horizon's registry, checked, applied to the ios-build branch's source
+# by the launcher's own native-mod staging (horizon-mixins), and compiled for iOS on a Mac. The
+# .ipa is published as a pre-release and linked in the issue.
+name: iOS build with native mods
+
+on:
+  workflow_dispatch:
+    inputs:
+      mods:
+        description: "Native mod ids, comma-separated (blank: the ones ticked in the issue)"
+        default: ""
+      instance:
+        description: "Instance number, digits (blank: a new instance). The same number updates that instance."
+        default: ""
+      name:
+        description: "The instance's name on the home screen (blank: Horizon <number>)"
+        default: ""
+  issues:
+    types: [edited]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: ios-native
+  cancel-in-progress: true
+
+env:
+  TITLE: Native mods for iOS
+
+jobs:
+  pick:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.title == 'Native mods for iOS' &&
+       contains(github.event.issue.body, '- [x] **Build now**'))
+    runs-on: ubuntu-24.04
+    outputs:
+      mods: ${{ steps.pick.outputs.mods }}
+      issue: ${{ steps.pick.outputs.issue }}
+      instance: ${{ steps.pick.outputs.instance }}
+      name: ${{ steps.pick.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ios-build
+          persist-credentials: false
+      - name: Pick the mods
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TYPED: ${{ inputs.mods }}
+          ISSUE: ${{ github.event.issue.number }}
+          INSTANCE: ${{ inputs.instance }}
+          NAME: ${{ inputs.name }}
+        run: |
+          # Each build is its own app (its own identifier and link) unless it updates one.
+          if ! [[ "$INSTANCE" =~ ^[0-9]{4,12}$ ]]; then
+            INSTANCE=$(python3 -c 'import secrets; print(100000 + secrets.randbelow(900000))')
+          fi
+          NAME=$(printf '%s' "$NAME" | tr -d '<>&"\\/`$' | tr -s ' ' | cut -c1-30)
+          [ -n "$NAME" ] || NAME="Horizon $INSTANCE"
+          echo "instance=$INSTANCE" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          if [ -z "$ISSUE" ]; then
+            ISSUE=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$TITLE\" in:title" \
+              --json number,title --jq "map(select(.title == \"$TITLE\")) | .[0].number // empty" || true)
+          fi
+          if [ -n "$TYPED" ]; then
+            mods=$(echo "$TYPED" | tr ', ' '\n\n' | grep -v '^$' | tr '\n' ' ')
+          else
+            gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" --json body --jq .body > body.md
+            mods=$(python3 -I packaging/ios/native/native_mods.py picked body.md | tr '\n' ' ')
+          fi
+          if [ -n "$ISSUE" ]; then
+            gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" --json body --jq .body \
+              | sed 's/^- \[[xX]\] \*\*Build now\*\*/- [ ] **Build now**/' > body.md
+            gh issue edit "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file body.md
+          fi
+          if [ -z "${mods// /}" ]; then
+            echo "No native mods ticked." >&2
+            [ -n "$ISSUE" ] && gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "🤖 Agent: nothing to build: tick at least one mod, then **Build now**."
+            exit 1
+          fi
+          echo "mods=$mods" >> "$GITHUB_OUTPUT"
+          echo "issue=$ISSUE" >> "$GITHUB_OUTPUT"
+          if [ -n "$ISSUE" ]; then
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "🤖 Agent: building Horizon for iOS with: \`${mods% }\` ([run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)). About 30-45 minutes."
+          fi
+
+  stage:
+    needs: pick
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    outputs:
+      package: ${{ steps.stage.outputs.package }}
+      features: ${{ steps.stage.outputs.features }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ios-build
+          path: horizon
+          persist-credentials: false
+      - name: Linux libraries the launcher links
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
+            libfontconfig-dev libvulkan-dev libasound2-dev libudev-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: horizon/launcher
+          key: native-stage
+      - name: Build the launcher's command line
+        run: cargo build --release --locked --manifest-path horizon/launcher/Cargo.toml --bin horizon-launcher
+      - name: Download and check the mods
+        env:
+          MODS: ${{ needs.pick.outputs.mods }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsSL https://horizon-rust.github.io/horizon-mods/index.json -o index.json
+          # The mod maker's own mods (ios-user-mod.yml) are this fork's mod-* releases.
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate --jq '.[]' \
+            | python3 -c 'import json,sys; print(json.dumps([json.loads(l) for l in sys.stdin if l.strip()]))' > releases.json
+          python3 -I horizon/packaging/ios/native/native_mods.py fetch index.json mods $MODS --user releases.json | tee fetched.json
+      - name: Stage the mods onto Horizon's source
+        id: stage
+        env:
+          HORIZON_LAUNCHER_HOME: ${{ runner.temp }}/launcher-home
+          HORIZON_LAUNCHER_NO_SELF_UPDATE: "1"
+        run: |
+          revision=$(git -C horizon rev-parse HEAD)
+          echo "$revision" > horizon/.horizon-revision
+          # As in GitHub's source archive, which the launcher stages from: no links
+          # (horizon-mixins refuses them), no git folder.
+          find horizon -type l -print -delete
+          rm -rf horizon/.git
+          # Absolute paths: the launcher runs horizon-mixins from its own folder.
+          if ! horizon/launcher/target/release/horizon-launcher native-stage "$PWD/mods" \
+            --source "$PWD/horizon" --revision "$revision" --out "$PWD/staged" --rust "$HOME/.cargo" \
+            --trust-native-code > staged.json; then
+            cat staged.json
+            tail -n 80 "$HORIZON_LAUNCHER_HOME/native/build.log" || true
+            exit 1
+          fi
+          cat staged.json
+          package=$(python3 -c 'import json;print(json.load(open("staged.json"))["package"])')
+          features=$(python3 -c 'import json;print("--features horizon-client/mods" if json.load(open("staged.json"))["mods_feature"] else "")')
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+          echo "features=$features" >> "$GITHUB_OUTPUT"
+          tar --exclude=./target --exclude=./.git --exclude=./launcher/target -czf staged.tar.gz -C staged .
+          ls -lh staged.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: staged
+          path: |
+            staged.tar.gz
+            fetched.json
+            staged.json
+          retention-days: 3
+      - name: Say what went wrong
+        if: failure() && needs.pick.outputs.issue != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment "${{ needs.pick.outputs.issue }}" --repo "$GITHUB_REPOSITORY" --body "🤖 Agent: staging the mods failed ([log]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)). A mod made for another Horizon version may not apply: untick it and build again."
+
+  ipa:
+    needs: [pick, stage]
+    runs-on: macos-15-intel
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ios-build
+          path: horizon
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: staged
+      - name: Unpack the staged source
+        run: mkdir ws && tar -xzf staged.tar.gz -C ws
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ws
+          key: ios-native
+      - name: Build
+        working-directory: ws
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+          HORIZON_IOS_REPO: ${{ github.repository }}
+        run: >-
+          cargo build --profile fast --locked --target aarch64-apple-ios
+          -p ${{ needs.stage.outputs.package }} --bin horizon-client ${{ needs.stage.outputs.features }}
+      - name: Package
+        id: package
+        env:
+          IOS_INSTANCE: ${{ needs.pick.outputs.instance }}
+          IOS_NAME: ${{ needs.pick.outputs.name }}
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' horizon/crates/horizon-client/Cargo.toml | head -1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          horizon/packaging/ios/package.sh ws/target/aarch64-apple-ios/fast/horizon-client "$version" dist
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.package.outputs.version }}
+          MODS: ${{ needs.pick.outputs.mods }}
+          ISSUE: ${{ needs.pick.outputs.issue }}
+          INSTANCE: ${{ needs.pick.outputs.instance }}
+          NAME: ${{ needs.pick.outputs.name }}
+        run: |
+          tag=ios-native-r$GITHUB_RUN_NUMBER
+          file="dist/Horizon-ios-$VERSION-native-r$GITHUB_RUN_NUMBER-i$INSTANCE.ipa"
+          cp dist/Horizon.ipa "$file"
+          {
+            echo "Horizon for iOS with native mods: \`${MODS% }\`."
+            echo
+            echo "Instance **$NAME** ($INSTANCE): it installs as its own app, beside Horizon and other instances. Opened with \`horizon-i$INSTANCE://\`."
+            # Read by the Horizon Mods app.
+            python3 -c 'import json,os; print("<!-- horizon-instance " + json.dumps({"id": os.environ["INSTANCE"], "name": os.environ["NAME"], "mods": os.environ["MODS"].split()}) + " -->")'
+            echo
+            echo "Native mods change the game's own code and run with full access to the app."
+            echo
+            echo '```json'
+            cat fetched.json
+            echo '```'
+          } > notes.md
+          gh release create "$tag" "$file" --repo "$GITHUB_REPOSITORY" --prerelease \
+            --title "$NAME: Horizon for iOS $VERSION with native mods (build $GITHUB_RUN_NUMBER)" --notes-file notes.md
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$tag/$(basename "$file")"
+          if [ -n "$ISSUE" ]; then
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "🤖 Agent: ready: [$(basename "$file")]($url). It installs as its own app, **$NAME**: sideload it beside Horizon."
+          fi
+      - name: Say what went wrong
+        if: failure() && needs.pick.outputs.issue != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment "${{ needs.pick.outputs.issue }}" --repo "$GITHUB_REPOSITORY" --body "🤖 Agent: compiling for iOS failed ([log]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)). A mod may use something iOS lacks: untick it and build again."
